@@ -1,0 +1,12 @@
+[project]
+name = "ossifyingfibroma"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.4.6",
+    "opencv-python-headless>=4.13.0.92",
+    "scikit-image>=0.26.0",
+    "scipy>=1.17.1",
+]

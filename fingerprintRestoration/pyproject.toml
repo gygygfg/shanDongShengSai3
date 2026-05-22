@@ -1,0 +1,11 @@
+[project]
+name = "fingerprintrestoration"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "fingerprint-enhancer>=0.0.14",
+    "keras>=3.14.1",
+    "pyfing>=0.6",
+    "tensorflow>=2.21.0",
+]
