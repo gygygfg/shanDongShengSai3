@@ -101,8 +101,9 @@ def add_speckle(image: np.ndarray, strength: float = 0.3):
 def generate_one():
     """生成一张完整的带噪声条纹图，随机添加0-4个应力点
 
-    返回: (img_clean_binary, img_noisy, img_edge, fringe_type, density, angle, n_stress)
+    返回: (img_clean_binary, img_clean_cont, img_noisy, img_edge, fringe_type, density, angle, n_stress)
           img_clean_binary — 无噪声的二值化条纹图（0/255，用于 CLEAN_DIR）
+          img_clean_cont   — 无噪声的连续 cos² 值（0-255 灰度，用于 U-Net 训练）
           img_noisy        — 添加噪声后的灰度图（用于 OUT_DIR）
           img_edge         — 解析边缘图（0-255，用于 EDGE_DIR）
     """
@@ -156,29 +157,39 @@ def generate_one():
 
     # 转为 0-255 uint8
     img_noisy = (fringe_noisy * 255).astype(np.uint8)
-    return img_clean_binary, img_noisy, img_edge, fringe_type, density, angle, len(stress_points)
+
+    # ── 连续干净图（cos² 值，供 U-Net 训练用）──
+    img_clean_cont = (fringe_clean * 255).astype(np.uint8)
+
+    return img_clean_binary, img_clean_cont, img_noisy, img_edge, fringe_type, density, angle, len(stress_points)
+
+OUT_DIR_CONT = "1Den_clean_cont"  # 连续值干净图（cos² 0-255 灰度）
 
 
 def main():
     import shutil
     # 清理旧数据，避免文件累积和可能的损坏
-    for d in [OUT_DIR, CLEAN_DIR, EDGE_DIR]:
+    for d in [OUT_DIR, CLEAN_DIR, EDGE_DIR, OUT_DIR_CONT]:
         if os.path.exists(d):
             shutil.rmtree(d)
     os.makedirs(OUT_DIR, exist_ok=True)
     os.makedirs(CLEAN_DIR, exist_ok=True)
     os.makedirs(EDGE_DIR, exist_ok=True)
+    os.makedirs(OUT_DIR_CONT, exist_ok=True)
 
     print(f"生成 {NUM_IMAGES} 张干涉条纹图...")
     print(f"  带噪声灰度图 → {OUT_DIR}/")
     print(f"  干净二值图   → {CLEAN_DIR}/")
+    print(f"  连续干净图   → {OUT_DIR_CONT}/")
     print(f"  解析边缘图   → {EDGE_DIR}/")
     for i in range(NUM_IMAGES):
-        img_clean, img_noisy, img_edge, ftype, density, angle, n_stress = generate_one()
+        img_clean, img_clean_cont, img_noisy, img_edge, ftype, density, angle, n_stress = generate_one()
         # 带噪声灰度图保存到 1Den
         Image.fromarray(img_noisy, mode="L").save(os.path.join(OUT_DIR, f"{i}.png"))
         # 干净二值图保存到 1Den_clean
         Image.fromarray(img_clean, mode="L").save(os.path.join(CLEAN_DIR, f"{i}.png"))
+        # 连续值干净图保存到 1Den_clean_cont（cos² 值 0-255 灰度，供 U-Net 训练）
+        Image.fromarray(img_clean_cont, mode="L").save(os.path.join(OUT_DIR_CONT, f"{i}.png"))
         # 解析边缘图保存到 1Den_edge
         Image.fromarray(img_edge, mode="L").save(os.path.join(EDGE_DIR, f"{i}.png"))
 

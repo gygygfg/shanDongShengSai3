@@ -28,7 +28,7 @@ class DoubleConv(nn.Module):
         return self.conv(x)
 
 class UNet(nn.Module):
-    def __init__(self, in_ch=1, out_ch=1, features=[64, 128, 256, 512]):
+    def __init__(self, in_ch=1, out_ch=1, features=[64, 128, 256]):
         super().__init__()
         self.downs = nn.ModuleList()
         self.pool = nn.MaxPool2d(2, 2)
@@ -92,11 +92,34 @@ def train():
         print(f"CPU cores detected: {cpu_count} (using GPU, CPU threads not throttled)")
 
     model = UNet(in_ch=1, out_ch=1).to(device)
-    criterion = nn.MSELoss()
+
+    # ── 组合损失：L1（保边缘）+ SSIM（保结构）──
+    class CombinedLoss(nn.Module):
+        def __init__(self, alpha=0.7):
+            super().__init__()
+            self.l1 = nn.L1Loss()
+            self.alpha = alpha
+
+        def forward(self, pred, target):
+            l1_loss = self.l1(pred, target)
+            # 简易 SSIM 近似：用 3x3 拉普拉斯边缘损失替代
+            laplacian_kernel = torch.tensor(
+                [[-1, -1, -1],
+                 [-1,  8, -1],
+                 [-1, -1, -1]], dtype=torch.float32, device=pred.device
+            ).unsqueeze(0).unsqueeze(0)
+            edge_pred = F.conv2d(pred, laplacian_kernel, padding=1)
+            edge_target = F.conv2d(target, laplacian_kernel, padding=1)
+            edge_loss = F.l1_loss(edge_pred, edge_target)
+            return self.alpha * l1_loss + (1 - self.alpha) * edge_loss
+
+    criterion = CombinedLoss(alpha=0.7)
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 
-    dataset = FringeDataset("1Den", "1Den_clean")
+    # 使用连续值干净图（cos² 值 0-255），而非二值图，让 U-Net 专心做去噪
+    # 二值化留给后处理（main.py 中固定阈值 0.5），避免网络同时做去噪+二值化
+    dataset = FringeDataset("1Den", "1Den_clean_cont")
     n_train = int(0.8 * len(dataset))
     n_val = len(dataset) - n_train
     train_ds, val_ds = torch.utils.data.random_split(dataset, [n_train, n_val])
