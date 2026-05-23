@@ -1,16 +1,19 @@
 """
 在现有条纹数据上训练 U-Net 去噪模型（1Den -> 1Den_clean）
 """
+
 import os
 import time
+
 import numpy as np
-from PIL import Image
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+
 
 # ── U-Net 架构 ─────────────────────────────────────────
 class DoubleConv(nn.Module):
@@ -24,8 +27,10 @@ class DoubleConv(nn.Module):
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
         )
+
     def forward(self, x):
         return self.conv(x)
+
 
 class UNet(nn.Module):
     def __init__(self, in_ch=1, out_ch=1, features=[64, 128, 256]):
@@ -54,10 +59,13 @@ class UNet(nn.Module):
             x = self.ups[i](x)
             skip = skip_connections[i // 2]
             if x.shape != skip.shape:
-                x = F.interpolate(x, size=skip.shape[2:], mode='bilinear', align_corners=True)
+                x = F.interpolate(
+                    x, size=skip.shape[2:], mode="bilinear", align_corners=True
+                )
             x = torch.cat([skip, x], dim=1)
             x = self.ups[i + 1](x)
         return self.final(x)
+
 
 # ── 数据集 ────────────────────────────────────────────────────
 class FringeDataset(Dataset):
@@ -65,15 +73,24 @@ class FringeDataset(Dataset):
         self.noisy_dir = noisy_dir
         self.clean_dir = clean_dir
         self.files = sorted(os.listdir(noisy_dir))
+
     def __len__(self):
         return len(self.files)
+
     def __getitem__(self, idx):
         fname = self.files[idx]
-        noisy = np.array(Image.open(os.path.join(self.noisy_dir, fname)), dtype=np.float32) / 255.0
-        clean = np.array(Image.open(os.path.join(self.clean_dir, fname)), dtype=np.float32) / 255.0
+        noisy = (
+            np.array(Image.open(os.path.join(self.noisy_dir, fname)), dtype=np.float32)
+            / 255.0
+        )
+        clean = (
+            np.array(Image.open(os.path.join(self.clean_dir, fname)), dtype=np.float32)
+            / 255.0
+        )
         noisy = torch.from_numpy(noisy).unsqueeze(0)
         clean = torch.from_numpy(clean).unsqueeze(0)
         return noisy, clean
+
 
 # ── 训练 ───────────────────────────────────────────────────
 def train():
@@ -86,56 +103,41 @@ def train():
         # 显式设置 PyTorch 线程数 = 物理核心数
         torch.set_num_threads(cpu_count)
         orig_threads = torch.get_num_threads()
-        print(f"CPU cores detected: {cpu_count}, PyTorch threads set to: {orig_threads}")
+        print(
+            f"CPU cores detected: {cpu_count}, PyTorch threads set to: {orig_threads}"
+        )
     else:
         orig_threads = None
         print(f"CPU cores detected: {cpu_count} (using GPU, CPU threads not throttled)")
 
     model = UNet(in_ch=1, out_ch=1).to(device)
-
-    # ── 组合损失：L1（保边缘）+ SSIM（保结构）──
-    class CombinedLoss(nn.Module):
-        def __init__(self, alpha=0.7):
-            super().__init__()
-            self.l1 = nn.L1Loss()
-            self.alpha = alpha
-
-        def forward(self, pred, target):
-            l1_loss = self.l1(pred, target)
-            # 简易 SSIM 近似：用 3x3 拉普拉斯边缘损失替代
-            laplacian_kernel = torch.tensor(
-                [[-1, -1, -1],
-                 [-1,  8, -1],
-                 [-1, -1, -1]], dtype=torch.float32, device=pred.device
-            ).unsqueeze(0).unsqueeze(0)
-            edge_pred = F.conv2d(pred, laplacian_kernel, padding=1)
-            edge_target = F.conv2d(target, laplacian_kernel, padding=1)
-            edge_loss = F.l1_loss(edge_pred, edge_target)
-            return self.alpha * l1_loss + (1 - self.alpha) * edge_loss
-
-    criterion = CombinedLoss(alpha=0.7)
+    criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 
-    # 使用连续值干净图（cos² 值 0-255），而非二值图，让 U-Net 专心做去噪
-    # 二值化留给后处理（main.py 中固定阈值 0.5），避免网络同时做去噪+二值化
-    dataset = FringeDataset("1Den", "1Den_clean_cont")
+    dataset = FringeDataset("1Den", "1Den_clean")
     n_train = int(0.8 * len(dataset))
     n_val = len(dataset) - n_train
     train_ds, val_ds = torch.utils.data.random_split(dataset, [n_train, n_val])
 
     # 动态 DataLoader 并发：num_workers = 核心数（上限 8，避免 I/O 过载）
     num_workers_full = min(cpu_count, 8)
-    train_loader = DataLoader(train_ds, batch_size=8, shuffle=True, num_workers=num_workers_full)
-    val_loader   = DataLoader(val_ds,   batch_size=8, shuffle=False, num_workers=num_workers_full)
+    train_loader = DataLoader(
+        train_ds, batch_size=8, shuffle=True, num_workers=num_workers_full
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=8, shuffle=False, num_workers=num_workers_full
+    )
 
     os.makedirs("checkpoints", exist_ok=True)
-    best_loss = float('inf')
-    epochs = 60
+    best_loss = float("inf")
+    epochs = 20
     threshold_epoch = int(epochs * 0.9)  # 54
 
     print(f"Training U-Net: {n_train} train / {n_val} val samples, {epochs} epochs")
-    print(f"  Full cores ({num_workers_full} workers / {orig_threads or 'N/A'} threads) for first {threshold_epoch} epochs")
+    print(
+        f"  Full cores ({num_workers_full} workers / {orig_threads or 'N/A'} threads) for first {threshold_epoch} epochs"
+    )
     print(f"  Half cores for last {epochs - threshold_epoch} epochs")
 
     total_start = time.time()
@@ -148,14 +150,35 @@ def train():
             half_threads = max(1, orig_threads // 2)
             torch.set_num_threads(half_threads)
             half_workers = max(1, num_workers_full // 2)
-            train_loader = DataLoader(train_ds, batch_size=8, shuffle=True, num_workers=half_workers)
-            val_loader   = DataLoader(val_ds,   batch_size=8, shuffle=False, num_workers=half_workers)
-            print(f"  [Epoch {epoch+1}] Reducing cores: threads={half_threads}, workers={half_workers}")
+            train_loader = DataLoader(
+                train_ds, batch_size=8, shuffle=True, num_workers=half_workers
+            )
+            val_loader = DataLoader(
+                val_ds, batch_size=8, shuffle=False, num_workers=half_workers
+            )
+            print(
+                f"  [Epoch {epoch+1}] Reducing cores: threads={half_threads}, workers={half_workers}"
+            )
+
+        # ── 每轮从训练集中随机抽 10 张图片 ──
+        indices = torch.randperm(len(train_ds))[:10].tolist()
+        epoch_train_ds = torch.utils.data.Subset(train_ds, indices)
+        epoch_train_loader = DataLoader(
+            epoch_train_ds, batch_size=min(8, len(indices)), shuffle=True, num_workers=0
+        )
+        print(
+            f"  [Epoch {epoch+1}] 从 {len(train_ds)} 张训练样本中随机抽取 {len(indices)} 张训练"
+        )
 
         # ── 训练阶段 ──
         model.train()
         train_loss = 0
-        train_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1:2d}/{epochs} [Train]", unit="batch", leave=False)
+        train_pbar = tqdm(
+            epoch_train_loader,
+            desc=f"Epoch {epoch+1:2d}/{epochs} [Train]",
+            unit="batch",
+            leave=False,
+        )
         for noisy, clean in train_pbar:
             noisy, clean = noisy.to(device), clean.to(device)
             optimizer.zero_grad()
@@ -165,12 +188,17 @@ def train():
             optimizer.step()
             train_loss += loss.item()
             train_pbar.set_postfix(loss=f"{loss.item():.6f}")
-        train_loss /= len(train_loader)
+        train_loss /= len(epoch_train_loader)
 
         # ── 验证阶段 ──
         model.eval()
         val_loss = 0
-        val_pbar = tqdm(val_loader, desc=f"Epoch {epoch+1:2d}/{epochs} [Val]  ", unit="batch", leave=False)
+        val_pbar = tqdm(
+            val_loader,
+            desc=f"Epoch {epoch+1:2d}/{epochs} [Val]  ",
+            unit="batch",
+            leave=False,
+        )
         with torch.no_grad():
             for noisy, clean in val_pbar:
                 noisy, clean = noisy.to(device), clean.to(device)
@@ -194,7 +222,9 @@ def train():
         elapsed = time.time() - epoch_start
         total_elapsed = time.time() - total_start
         lr = scheduler.get_last_lr()[0]
-        print(f"  Epoch {epoch+1:2d}/{epochs} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f} | LR: {lr:.6f} | {elapsed:.1f}s | Total: {total_elapsed/60:.1f}m{is_best}")
+        print(
+            f"  Epoch {epoch+1:2d}/{epochs} | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f} | LR: {lr:.6f} | {elapsed:.1f}s | Total: {total_elapsed/60:.1f}m{is_best}"
+        )
 
     print(f"Training complete. Best val loss: {best_loss:.6f}")
     torch.save(model.state_dict(), "checkpoints/unet_denoiser_final.pth")
