@@ -411,7 +411,7 @@ def main():
         batch_size=BATCH_SIZE,
         shuffle=True,
         num_workers=NUM_WORKERS,
-        pin_memory=True,
+        pin_memory=torch.cuda.is_available(),
     )
     val_loader = DataLoader(
         train_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS
