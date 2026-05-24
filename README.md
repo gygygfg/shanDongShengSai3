@@ -25,6 +25,49 @@ dasai/
 
 ---
 
+## ⚙️ 环境搭建与运行
+
+### 前置要求
+
+- **Python** ≥ 3.12
+- **[uv](https://docs.astral.sh/uv/)**（极速 Python 包管理器）
+- **Git**
+
+> 安装 uv：
+> ```bash
+> # macOS / Linux
+> curl -LsSf https://astral.sh/uv/install.sh | sh
+> # Windows (PowerShell)
+> powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+> ```
+
+### 快速开始
+
+每个赛道都是独立项目，进入对应目录后执行：
+
+```bash
+# 1. 进入赛道目录
+cd <赛道目录>
+
+# 2. 自动创建虚拟环境并安装依赖
+uv sync
+
+# 3. 在虚拟环境中运行主程序
+uv run main.py
+```
+
+### 各赛道运行
+
+| 赛道 | 目录                            | 命令                                          |
+| ---- | ------------------------------- | --------------------------------------------- |
+| 🧪   | `interferenceFringeDenoising/`  | `cd interferenceFringeDenoising && uv run main.py` |
+| 🖐️   | `fingerprintRestoration/`       | `cd fingerprintRestoration && uv run main.py`      |
+| 🔬   | `ossifyingFibroma/`             | `cd ossifyingFibroma && uv run main.py`            |
+
+> ⚠️ 赛道一首次运行前，需先执行 `uv run generate_fringes.py` 生成合成训练数据，再执行 `uv run train_unet.py` 训练模型，最后执行 `uv run main.py` 推理。详见下方赛道一的 **运行方式**。
+
+---
+
 ## 赛道一 🧪 干涉条纹去噪
 
 **目录：** `interferenceFringeDenoising/`
@@ -58,13 +101,13 @@ dasai/
 cd interferenceFringeDenoising
 
 # 生成合成训练数据（10000张256x256条纹图）
-python generate_fringes.py
+uv run generate_fringes.py
 
 # 训练 U-Net 模型
-python train_unet.py
+uv run train_unet.py
 
 # 对 1Den/ 图片去噪并输出到 ../results/
-python main.py
+uv run main.py
 ```
 
 ---
@@ -111,7 +154,7 @@ python main.py
 
 ```bash
 cd fingerprintRestoration
-python main.py
+uv run main.py
 ```
 
 ---
@@ -156,7 +199,7 @@ python main.py
 cd ossifyingFibroma
 
 # 训练 CNN + GAN 混合分割模型（自动保存最佳模型到 outputs/）
-python main.py
+uv run main.py
 
 # 训练完成后自动对 3Seg/ 中所有图片进行推理并输出到 ../results/
 ```
